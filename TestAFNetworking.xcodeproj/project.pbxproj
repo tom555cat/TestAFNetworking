@@ -13,6 +13,8 @@
 		8E074CFA22F3CD1100CECAF6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8E074CF922F3CD1100CECAF6 /* Assets.xcassets */; };
 		8E074CFD22F3CD1100CECAF6 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8E074CFB22F3CD1100CECAF6 /* LaunchScreen.storyboard */; };
 		8E074D0022F3CD1100CECAF6 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074CFF22F3CD1100CECAF6 /* main.m */; };
+		8E074D0922F3CE0A00CECAF6 /* TLMAFURLSessionManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */; };
+		8E074D5722F814FA00CECAF6 /* AFSecurityPolicy.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074D5622F814FA00CECAF6 /* AFSecurityPolicy.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +28,10 @@
 		8E074CFC22F3CD1100CECAF6 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8E074CFE22F3CD1100CECAF6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8E074CFF22F3CD1100CECAF6 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		8E074D0722F3CE0A00CECAF6 /* TLMAFURLSessionManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TLMAFURLSessionManager.h; sourceTree = "<group>"; };
+		8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TLMAFURLSessionManager.m; sourceTree = "<group>"; };
+		8E074D5522F814FA00CECAF6 /* AFSecurityPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AFSecurityPolicy.h; sourceTree = "<group>"; };
+		8E074D5622F814FA00CECAF6 /* AFSecurityPolicy.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AFSecurityPolicy.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +64,7 @@
 		8E074CEF22F3CD1100CECAF6 /* TestAFNetworking */ = {
 			isa = PBXGroup;
 			children = (
+				8E074D0622F3CDDE00CECAF6 /* AFNetworking */,
 				8E074CF022F3CD1100CECAF6 /* AppDelegate.h */,
 				8E074CF122F3CD1100CECAF6 /* AppDelegate.m */,
 				8E074CF322F3CD1100CECAF6 /* ViewController.h */,
@@ -69,6 +76,25 @@
 				8E074CFF22F3CD1100CECAF6 /* main.m */,
 			);
 			path = TestAFNetworking;
+			sourceTree = "<group>";
+		};
+		8E074D0622F3CDDE00CECAF6 /* AFNetworking */ = {
+			isa = PBXGroup;
+			children = (
+				8E074D5422F814D200CECAF6 /* Security */,
+				8E074D0722F3CE0A00CECAF6 /* TLMAFURLSessionManager.h */,
+				8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */,
+			);
+			path = AFNetworking;
+			sourceTree = "<group>";
+		};
+		8E074D5422F814D200CECAF6 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				8E074D5522F814FA00CECAF6 /* AFSecurityPolicy.h */,
+				8E074D5622F814FA00CECAF6 /* AFSecurityPolicy.m */,
+			);
+			path = Security;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -142,6 +168,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				8E074CF522F3CD1100CECAF6 /* ViewController.m in Sources */,
+				8E074D5722F814FA00CECAF6 /* AFSecurityPolicy.m in Sources */,
+				8E074D0922F3CE0A00CECAF6 /* TLMAFURLSessionManager.m in Sources */,
 				8E074D0022F3CD1100CECAF6 /* main.m in Sources */,
 				8E074CF222F3CD1100CECAF6 /* AppDelegate.m in Sources */,
 			);
