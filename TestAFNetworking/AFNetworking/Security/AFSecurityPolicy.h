@@ -68,7 +68,7 @@ NS_ASSUME_NONNULL_BEGIN
  
  @return Whether or not to trust the server.
  */
-//
+// 该方法在响应服务器的认证质询的时候调用，serverTru
 - (BOOL)evaluateServerTrust:(SecTrustRef)serverTrust
                   forDomain:(nullable NSString *)domain;
 
