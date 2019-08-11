@@ -16,7 +16,7 @@ typedef NS_ENUM(NSUInteger, AFSSLPinningMode) {
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface AFSecurityPolicy : NSObject
+@interface AFSecurityPolicy : NSObject <NSSecureCoding>
 
 // 服务器证书验证标准，默认是AFSSLPinningModeNone，只使用系统的信任机构公钥来验证服务器证书
 @property (readonly, nonatomic, assign) AFSSLPinningMode SSLPinningMode;

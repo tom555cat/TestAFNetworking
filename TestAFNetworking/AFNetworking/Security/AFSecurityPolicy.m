@@ -8,6 +8,38 @@
 
 #import "AFSecurityPolicy.h"
 
+static id AFPublicKeyForCertificate(NSData *certificate) {
+    id allowedPublicKey = nil;
+    SecCertificateRef allowedCertificate;
+    SecPolicyRef policy = nil;
+    SecTrustRef allowedTrust = nil;
+    SecTrustResultType result;
+    
+    allowedCertificate = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificate);
+    __Require_Quiet(allowedCertificate != NULL, _out);
+    
+    policy = SecPolicyCreateBasicX509();
+    __Require_noErr_Quiet(SecTrustCreateWithCertificates(allowedCertificate, policy, &allowedTrust), _out);
+    __Require_noErr_Quiet(SecTrustEvaluate(allowedTrust, &result), _out);
+    
+    allowedPublicKey = (__bridge_transfer id)SecTrustCopyPublicKey(allowedTrust);
+    
+_out:
+    if (allowedTrust) {
+        CFRelease(allowedTrust);
+    }
+    
+    if (policy) {
+        CFRelease(policy);
+    }
+    
+    if (allowedCertificate) {
+        CFRelease(allowedCertificate);
+    }
+    
+    return allowedPublicKey;
+}
+
 static BOOL AFServerTrustIsValid(SecTrustRef serverTrust) {
     BOOL isValid = NO;
     SecTrustResultType result;
@@ -236,5 +268,29 @@ static BOOL AFSecKeyIsEqualToKey(SecKeyRef key1, SecKeyRef key2) {
     }
 }
 
+#pragma mark - NSSecureCoding
+
++ (BOOL)supportsSecureCoding {
+    return YES;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)decoder {
+    self = [self init];
+    if (!self) {
+        return nil;
+    }
+    
+    self.SSLPinningMode = [[decoder decodeObjectOfClass:[NSNumber class] forKey:NSStringFromSelector(@selector(SSLPinningMode))] unsignedIntegerValue];
+    self.allowInvalidCertificates = [decoder decodeBoolForKey:NSStringFromSelector(@selector(allowInvalidCertificates))];
+    self.validatesDomainName = [decoder decodeBoolForKey:NSStringFromSelector(@selector(validatesDomainName))];
+    self.pinnedCertificates = [decoder decodeObjectOfClass:[NSArray class] forKey:NSStringFromSelector(@selector(pinnedCertificates))];
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeObject:[NSNumber numberWithUnsignedInteger:self.SSLPinningMode] forKey:NSStringFromSelector(@selector(SSLPinningMode))];
+    [coder encodeBool:self.allowInvalidCertificates forKey:NSStringFromSelector(@selector(allowInvalidCertificates))];
+    [coder encodeBool:self.validatesDomainName forKey:NSStringFromSelector(@selector(validatesDomainName))];
+    [coder encodeObject:self.pinnedCertificates forKey:NSStringFromSelector(@selector(pinnedCertificates))];
+}
 
 @end
