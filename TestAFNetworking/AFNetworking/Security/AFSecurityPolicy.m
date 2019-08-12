@@ -53,7 +53,7 @@ _out:
 }
 
 static NSArray * AFCertificateTrustChainForServerTrust(SecTrustRef serverTrust) {
-    // SecTrustGetCertificateCount: 返回已经对serverTrust校验过的证书链的数目
+    // SecTrustGetCertificateCount: 返回已经对serverTrust通过校验的证书链中证书的数目
     CFIndex certificateCount = SecTrustGetCertificateCount(serverTrust);
     NSMutableArray *trustChain = [NSMutableArray arrayWithCapacity:(NSUInteger)certificateCount];
     
@@ -88,6 +88,7 @@ static NSArray * AFPublicKeyTrustChainForServerTrust(SecTrustRef serverTrust) {
         __Require_noErr_Quiet(SecTrustEvaluate(trust, &result), _out);
         
         // SecTrustCopyPublicKey：通过校验之后，返回trust的公钥
+        // 需要从trust中拿取到公钥，所以这个过程比较繁琐
         [trustChain addObject:(__bridge_transfer id)SecTrustCopyPublicKey(trust)];
         
     _out:
@@ -200,13 +201,15 @@ static BOOL AFSecKeyIsEqualToKey(SecKeyRef key1, SecKeyRef key2) {
     
     NSMutableArray *policies = [NSMutableArray array];
     if (self.validatesDomainName) {
-        // 如果要校验域名
+        // SecPolicyCreateSSL:返回一个验证SSL证书链的policy，第二个参数是hostname，如果指定了这个参数，这个policy会验证leaf证书中的host name。
         [policies addObject:(__bridge_transfer id)SecPolicyCreateSSL(true, (__bridge CFStringRef)domain)];
     } else {
+        // SecPolicyCreateBasicX509:返回一个默认的X.509 policy.
         [policies addObject:(__bridge_transfer id)SecPolicyCreateBasicX509()];
     }
     
     // 设置要校验的trust的policy
+    // 使用SecTrustSetPolicies设置新的policies会替换serverTrust中之前的policies。
 #warning 注意CFArrayRef和NSArray之间的转换
     SecTrustSetPolicies(serverTrust, (__bridge CFArrayRef)policies);
     
@@ -226,14 +229,15 @@ static BOOL AFSecKeyIsEqualToKey(SecKeyRef key1, SecKeyRef key2) {
                 // SecCertificateCreateWithData:根据CFData创建一个证书
                 [pinnedCertificates addObject:(__bridge_transfer id)SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certificateData)];
             }
-            // 设置一个trust的证书锚点，之后校验证书就使用这些锚点证书
+            // SecTrustSetAnchorCertificates:为一个trust设置锚点证书，当通过SecTrustEvalue校验trust的时候
+            // 遇到这些锚点证书，则说明通过了校验。
             SecTrustSetAnchorCertificates(serverTrust, (__bridge CFArrayRef)pinnedCertificates);
             
             if (!AFServerTrustIsValid(serverTrust)) {
                 return NO;
             }
             
-            // 获取通过校验的证书链，应该在最后位置就是预埋证书(如果它不是根证书)
+            // 获取通过校验的证书，"应该"包含预埋证书(是通过验证的锚点证书)，在最后一个位置
             NSArray *serverCertificates = AFCertificateTrustChainForServerTrust(serverTrust);
             
             for (NSData *trustChainCertificate in [serverCertificates reverseObjectEnumerator]) {
@@ -291,6 +295,18 @@ static BOOL AFSecKeyIsEqualToKey(SecKeyRef key1, SecKeyRef key2) {
     [coder encodeBool:self.allowInvalidCertificates forKey:NSStringFromSelector(@selector(allowInvalidCertificates))];
     [coder encodeBool:self.validatesDomainName forKey:NSStringFromSelector(@selector(validatesDomainName))];
     [coder encodeObject:self.pinnedCertificates forKey:NSStringFromSelector(@selector(pinnedCertificates))];
+}
+
+#pragma mark - NSCopying
+
+- (instancetype)copyWithZone:(NSZone *)zone {
+    AFSecurityPolicy *securityPolicy = [[[self class] allocWithZone:zone] init];
+    securityPolicy.SSLPinningMode = self.SSLPinningMode;
+    securityPolicy.allowInvalidCertificates = self.allowInvalidCertificates;
+    securityPolicy.validatesDomainName = self.validatesDomainName;
+    securityPolicy.pinnedCertificates = [self.pinnedCertificates copyWithZone:zone];
+    
+    return securityPolicy;
 }
 
 @end
