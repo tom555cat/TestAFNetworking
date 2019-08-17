@@ -8,6 +8,7 @@
 
 #import "TLMAFURLSessionManager.h"
 
+
 ///为了修复bug而定义的宏
 
 #ifndef NSFoundationVersionNumber_iOS_8_0
@@ -38,12 +39,16 @@ static void url_session_manager_create_task_safely(dispatch_block_t _Nonnull blo
 
 NSString * const AFURLSessionDidInvalidateNotification = @"com.alamofire.networking.session.invalidate";
 
+#warning 定义回调参数，用户不会关心参数typedef之后的类型是什么，而是需要关注回调参数中每个需要的参数的类型，以便于传递参数；而开发者需要区分不用的回调参数的意义，以便于在合适的时机调用它。
 // 虽然参数一样，但是针对不同的代理回调，命名了不同的名字，以便于方便设置。
 typedef void (^AFURLSessionDidBecomeInvalidBlock)(NSURLSession *session, NSError *error);
 typedef NSURL * (^AFURLSessionDownloadTaskDidFinishDownloadingBlock)(NSURLSession *session, NSURLSessionDownloadTask *downloadTask, NSURL *location);
 typedef void (^AFURLSessionTaskProgressBlock)(NSProgress *);
 typedef void (^AFURLSessionTaskCompletionHandler)(NSURLResponse *response, id responseObject, NSError *error);
 typedef NSURLSessionAuthChallengeDisposition (^AFURLSessionDidReceiveAuthenticationChallengeBlock)(NSURLSession *session, NSURLAuthenticationChallenge *challenge, NSURLCredential * __autoreleasing *credential);
+
+typedef NSURLSessionAuthChallengeDisposition (^AFURLSessionTaskDidReceiveAuthenticationChallengeBlock)(NSURLSession *session, NSURLSessionTask *task, NSURLAuthenticationChallenge *challenge, NSURLCredential * __autoreleasing *credential);
+typedef NSInputStream * (^AFURLSessionTaskNeedNewBodyStreamBlock)(NSURLSession *session, NSURLSessionTask *task);
 
 #pragma mark -
 
@@ -156,6 +161,11 @@ typedef NSURLSessionAuthChallengeDisposition (^AFURLSessionDidReceiveAuthenticat
 @property (readwrite, nonatomic, strong) NSLock *lock;
 @property (readwrite, nonatomic, copy) AFURLSessionDidBecomeInvalidBlock sessionDidBecomeInvalid;
 @property (readwrite, nonatomic, copy) AFURLSessionDidReceiveAuthenticationChallengeBlock sessionDidReceiveAuthenticationChallenge;
+
+@property (readwrite, nonatomic, copy) AFURLSessionTaskWillPerformHTTPRedirectionBlock taskWillPerformHTTPRedirection;
+@property (readwrite, nonatomic, copy) AFURLSessionTaskDidReceiveAuthenticationChallengeBlock taskDidReceiveAuthenticationChallenge;
+@property (readwrite, nonatomic, copy) AFURLSessionTaskNeedNewBodyStreamBlock taskNeedNewBodyStream;
+
 @end
 
 @implementation TLMAFURLSessionManager
@@ -225,7 +235,7 @@ typedef NSURLSessionAuthChallengeDisposition (^AFURLSessionDidReceiveAuthenticat
     self.sessionDidBecomeInvalid = block;
 }
 
-#pragma mark -
+#pragma mark - 操作关键字典数据结构的方法写在了一起
 
 - (void)setDelegate:(AFURLSessionManagerTaskDelegate *)delegate
             forTask:(NSURLSessionTask *)task {
@@ -253,6 +263,15 @@ typedef NSURLSessionAuthChallengeDisposition (^AFURLSessionDidReceiveAuthenticat
     
     delegate.uploadProgressBlock = uploadProgressBlock;
     delegate.downloadProgressBlock = downloadProgressBlock;
+}
+
+- (void)removeDelegateForTask:(NSURLSessionTask *)task {
+    NSParameterAssert(task);
+    
+    [self.lock lock];
+    [self removeNotificationObserverForTask:task];
+    [self.mutableTaskDelegatesKeyedByTaskIdentifier removeObjectForKey:@(task.taskIdentifier)];
+    [self.lock unlock];
 }
 
 #pragma mark -
@@ -308,22 +327,169 @@ didBecomeInvalidWithError:(nullable NSError *)error {
     [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDidInvalidateNotification object:session];
 }
 
+#warning session-level的认证和task-level的认证有什么区别？
+// 1. 是session-level
 - (void)URLSession:(NSURLSession *)session
 didReceiveChallenge:(nonnull NSURLAuthenticationChallenge *)challenge
  completionHandler:(nonnull void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * _Nullable))completionHandler
 {
     NSURLSessionAuthChallengeDisposition disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+    // 用户身份认证方式，支持:1> password-based user credentials，2> certificate-based user credentials
+    // 3> certificate-based server credentials.
     __block NSURLCredential *credential = nil;
     
     if (self.sessionDidReceiveAuthenticationChallenge) {    // 如果有自定义的处理方式，那么就使用默认的处理方式
         disposition = self.sessionDidReceiveAuthenticationChallenge(session, challenge, &credential);
     } else {
         if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
-            // 如果是服务器证书校验
-            if ([self.securityPolicy ]) {
-                <#statements#>
+            // 如果是校验服务器server trust(server trust从服务器的证书和policy创建而来)
+            if ([self.securityPolicy evaluateServerTrust:challenge.protectionSpace.serverTrust forDomain:challenge.protectionSpace.host]) {
+                // .........
+                disposition = NSURLSessionAuthChallengeUseCredential;
+            } else {
+                // 服务器证书验证失败，取消全部的网络请求。
+                disposition = NSURLSessionAuthChallengeCancelAuthenticationChallenge;
             }
+        } else {
+            disposition = NSURLSessionAuthChallengePerformDefaultHandling;
         }
+    }
+    
+    if (completionHandler) {
+        completionHandler(disposition, credential);
+    }
+}
+
+#pragma mark - NSURLSessionTaskDelegate
+
+// 6. If the response is an HTTP redirect response, the NSURLSession object calls the delegate’s
+// URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:
+// 如果服务器返回的response是重定向，则会调用这个回调
+
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+willPerformHTTPRedirection:(nonnull NSHTTPURLResponse *)response
+        newRequest:(nonnull NSURLRequest *)request
+ completionHandler:(nonnull void (^)(NSURLRequest * _Nullable))completionHandler {
+    
+    NSURLRequest *redirectRequest = request;
+    
+    if (self.taskWillPerformHTTPRedirection) {
+        redirectRequest = self.taskWillPerformHTTPRedirection(session, task, response, request);
+    }
+    
+    if (completionHandler) {
+        completionHandler(redirectRequest);
+    }
+}
+
+// 1. 是task-level
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didReceiveChallenge:(nonnull NSURLAuthenticationChallenge *)challenge
+ completionHandler:(nonnull void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * _Nullable))completionHandler {
+    NSURLSessionAuthChallengeDisposition disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+    __block NSURLCredential *credential = nil;
+    
+    // 这个是taskDidReceiveAuthenticationChallenge，而不是sessionDidReceiveAuthenticationChallenge
+    if (self.taskDidReceiveAuthenticationChallenge) {
+        disposition = self.taskDidReceiveAuthenticationChallenge(session, task, challenge, &credential);
+    } else {
+        if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+            if ([self.securityPolicy evaluateServerTrust:challenge.protectionSpace.serverTrust forDomain:challenge.protectionSpace.host]) {
+                disposition = NSURLSessionAuthChallengeUseCredential;
+                // 根据服务器的trust创建用户的身份证书，但是必须先验证服务器的trust
+                credential = [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust];
+            } else {
+                disposition = NSURLSessionAuthChallengeCancelAuthenticationChallenge;
+            }
+        } else {
+            disposition = NSURLSessionAuthChallengePerformDefaultHandling;
+        }
+    }
+    
+    if (completionHandler) {
+        completionHandler(disposition, credential);
+    }
+}
+
+// 2. 如果request的data来自stream，则需要提供这个stream，来提供body的data
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+ needNewBodyStream:(nonnull void (^)(NSInputStream * _Nullable))completionHandler {
+    NSInputStream *inputStream = nil;
+    
+    if (self.taskNeedNewBodyStream) {
+        inputStream = self.taskNeedNewBodyStream(session, task);
+    } else if (task.originalRequest.HTTPBodyStream && [task.originalRequest.HTTPBodyStream conformsToProtocol:@protocol(NSCopying)]) {
+        inputStream = [task.originalRequest.HTTPBodyStream copy];
+    }
+    
+    if (completionHandler) {
+        completionHandler(inputStream);
+    }
+}
+
+// 3. body上传服务器的初始阶段，会周期性的调用这个方法
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+   didSendBodyData:(int64_t)bytesSent
+    totalBytesSent:(int64_t)totalBytesSent
+totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend {
+    
+    int64_t totalUnitCount = totalBytesExpectedToSend;
+    if (totalUnitCount == NSURLSessionTransferSizeUnknown) {
+        // 如果代理中没有拿到上传总大小，那么从task的request中的header中拿取Content-Length来作为总大小
+        NSString *contentLength = [task.originalRequest valueForHTTPHeaderField:@"Content-Length"];
+        if (contentLength) {
+            totalUnitCount = (int64_t) [contentLength longLongValue];
+        }
+    }
+    
+    // 获取task对应的代理
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:task];
+    
+    if (delegate) {
+        // 执行代理的同名方法
+        [delegate URLSession:session task:task didSendBodyData:bytesSent totalBytesSent:totalBytesSent totalBytesExpectedToSend:totalBytesExpectedToSend];
+    }
+    
+    if (self.taskDidSendBodyData) {
+        self.taskDidSendBodyData(session, task, bytesSent, totalBytesSent, totalUnitCount);
+    }
+}
+
+// 13. 当task完成，就会调用这个代理，如果没有错误则errorw是nil
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didCompleteWithError:(NSError *)error
+{
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:task];
+    
+    // delegate may be nil when completing a task in the background
+    if (delegate) {
+        [delegate URLSession:session task:task didCompleteWithError:error];
+        
+        [self removeDelegateForTask:task];
+    }
+    
+    if (self.taskDidComplete) {
+        self.taskDidComplete(session, task, error);
+    }
+}
+
+// 告诉代理session已经完成了对task的metrics的搜集
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSession *)task
+didFinishCollectingMetrics:(nonnull NSURLSessionTaskMetrics *)metrics {
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:task];
+    // Metrics may fire after URLSession:task:didCompleteWithError: is called, delegate may be nil
+    if (delegate) {
+        [delegate URLSession:session task:task didFinishCollectingMetrics:metrics];
+    }
+    
+    if (self.taskDidFinishCollectingMetrics) {
+        self.taskDidFinishCollectingMetrics(session, task, metrics);
     }
 }
 

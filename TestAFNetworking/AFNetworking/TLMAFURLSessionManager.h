@@ -7,6 +7,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import "AFSecurityPolicy.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -127,6 +128,9 @@ NS_ASSUME_NONNULL_BEGIN
 ///-----------------------------------------
 
 - (void)setSessionDidBecomeInvalidBlock:(nullable void (^)(NSURLSession *session, NSError *error))block;
+
+// 设置处理重定向response的block
+- (void)setTaskWillPerformHTTPRedirectionBlock:(nullable NSURLRequest * _Nullable (^)(NSURLSession *session, NSURLSessionTask *task, NSURLResponse *response, NSURLRequest *request))block;
 
 ///--------------------------------------
 /// @name 设置Task Delegate中需要的回调
