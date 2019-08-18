@@ -63,6 +63,8 @@ typedef NSInputStream * (^AFURLSessionTaskNeedNewBodyStreamBlock)(NSURLSession *
 @property (nonatomic, copy) NSURL *downloadFileURL;
 #warning 这个TaskMetric是干什么的？
 #if AF_CAN_INCLUDE_SESSION_TASK_METRICS
+// 当任务结束之后，会调用URLSession:task:didFinishCollectingMetrics:【NSURLSessionTaskMetrics】代理,
+// 记录本次task的metrics
 @property (nonatomic, strong) NSURLSessionTaskMetrics *sessionTaskMetrics;
 #endif
 @property (nonatomic, copy) AFURLSessionDownloadTaskDidFinishDownloadingBlock downloadTaskDidFinishDownloading;
@@ -137,6 +139,67 @@ typedef NSInputStream * (^AFURLSessionTaskNeedNewBodyStreamBlock)(NSURLSession *
 }
 
 #pragma mark - NSURLSessionTaskDelegate
+
+// 每个task的delegate重新定义了URLSession:task:didCompleteWithError:方法，
+// 这里其实是一个if-else设计模式。
+- (void)URLSession:(__unused NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didCompleteWithError:(NSError *)error {
+    __strong AFURLSessionManager *manager = self.manager;
+    
+    __block id responseObject = nil;
+    
+    __block NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    userInfo[AFNetworkingTaskDidCompleteResponseSerializerKey] = manager.responseSerializer;
+    
+    //Performance Improvement from #2672
+    NSData *data = nil;
+    if (self.mutableData) {
+        data = [self.mutableData copy];
+        //We no longer need the reference, so nil it out to gain back some memory.
+        // 对于不需要的内存，尽早释放
+        self.mutableData = nil;
+    }
+    
+#if AF_CAN_USE_AT_AVAILABLE && AF_CAN_INCLUDE_SESSION_TASK_METRICS
+    if (@available(iOS 10, macOS 10.12, watchOS 3, tvOS 10, *)) {
+        if (self.sessionTaskMetrics) {
+            userInfo[AFNetworkingTaskDidCompleteSessionTaskMetrics] = self.sessionTaskMetrics;
+        }
+    }
+#endif
+    
+    // 有downloadFileURL是一个download task，否则就是一个data task
+    if (self.downloadFileURL) {
+        userInfo[AFNetworkingTaskDidCompleteAssetPathKey] = self.downloadFileURL;
+    } else if (data) {
+        userInfo[AFNetworkingTaskDidCompleteResponseDataKey] = data;
+    }
+    
+    // 错误处理
+    if (error) {
+        userInfo[AFNetworkingTaskDidCompleteErrorKey] = error;
+        
+        dispatch_group_async(manager.completionGroup ?: url_session_manager_completion_group(), manager.completionQueue ?: dispatch_get_main_queue(), ^{
+            if (self.completionHandler) {
+                self.completionHandler(task.response, responseObject, error);
+            }
+            
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:AFNetworkingTaskDidCompleteNotification object:task userInfo:userInfo];
+            });
+        });
+    }
+}
+
+// 每个task自己又实现了didFinishCollectingMetrics:方法，自己记录了NSURLSessionTaskMetrics
+#if AF_CAN_INCLUDE_SESSION_TASK_METRICS
+- (void)URLSession:(NSURLSession *)session
+              task:(NSURLSessionTask *)task
+didFinishCollectingMetrics:(NSURLSessionTaskMetrics *)metrics {
+    self.sessionTaskMetrics = metrics;
+}
+#endif
 
 #pragma mark - NSURLSessionDataDelegate
 
@@ -275,6 +338,46 @@ typedef NSInputStream * (^AFURLSessionTaskNeedNewBodyStreamBlock)(NSURLSession *
     delegate.uploadProgressBlock = uploadProgressBlock;
     delegate.downloadProgressBlock = downloadProgressBlock;
 }
+
+- (void)addDelegateForUploadTask:(NSURLSessionUploadTask *)uploadTask
+                        progress:(void (^)(NSProgress *uploadProgress)) uploadProgressBlock
+               completionHandler:(void (^)(NSURLResponse *response, id responseObject, NSError *error))completionHandler
+{
+    AFURLSessionManagerTaskDelegate *delegate = [[AFURLSessionManagerTaskDelegate alloc] initWithTask:uploadTask];
+    delegate.manager = self;
+    delegate.completionHandler = completionHandler;
+    
+    uploadTask.taskDescription = self.taskDescriptionForSessionTasks;
+    
+    [self setDelegate:delegate forTask:uploadTask];
+    
+    // 上传task只包含一个uploadProgressBlock
+    delegate.uploadProgressBlock = uploadProgressBlock;
+}
+
+- (void)addDelegateForDownloadTask:(NSURLSessionDownloadTask *)downloadTask
+                          progress:(void (^)(NSProgress *downloadProgress)) downloadProgressBlock
+                       destination:(NSURL * (^)(NSURL *targetPath, NSURLResponse *response))destination
+                 completionHandler:(void (^)(NSURLResponse *response, NSURL *filePath, NSError *error))completionHandler
+{
+    AFURLSessionManagerTaskDelegate *delegate = [[AFURLSessionManagerTaskDelegate alloc] initWithTask:downloadTask];
+    delegate.manager = self;
+    delegate.completionHandler = completionHandler;
+    
+#warning 这里还要回来重新看
+    if (destination) {
+        delegate.downloadTaskDidFinishDownloading = ^NSURL * (NSURLSession * __unused session, NSURLSessionDownloadTask *task, NSURL *location) {
+            return destination(location, task.response);
+        };
+    }
+    
+    downloadTask.taskDescription = self.taskDescriptionForSessionTasks;
+    
+    [self setDelegate:delegate forTask:downloadTask];
+    
+    delegate.downloadProgressBlock = downloadProgressBlock;
+}
+
 
 - (void)removeDelegateForTask:(NSURLSessionTask *)task {
     NSParameterAssert(task);
