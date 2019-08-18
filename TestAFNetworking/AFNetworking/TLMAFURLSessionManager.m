@@ -237,6 +237,17 @@ typedef NSInputStream * (^AFURLSessionTaskNeedNewBodyStreamBlock)(NSURLSession *
 
 #pragma mark - 操作关键字典数据结构的方法写在了一起
 
+- (AFURLSessionManagerTaskDelegate *)delegateForTask:(NSURLSessionTask *)task {
+    NSParameterAssert(task);
+    
+    AFURLSessionManagerTaskDelegate *delegate = nil;
+    [self.lock lock];
+    delegate = self.mutableTaskDelegatesKeyedByTaskIdentifier[@(task.taskIdentifier)];
+    [self.lock unlock];
+    
+    return delegate;
+}
+
 - (void)setDelegate:(AFURLSessionManagerTaskDelegate *)delegate
             forTask:(NSURLSessionTask *)task {
     NSParameterAssert(task);
@@ -492,5 +503,189 @@ didFinishCollectingMetrics:(nonnull NSURLSessionTaskMetrics *)metrics {
         self.taskDidFinishCollectingMetrics(session, task, metrics);
     }
 }
+
+#pragma mark - NSURLSessionDataDelegate
+
+// 8. 对于一个data task，NSURLSession调用这个回调，决定是否将这个data task转化为一个
+// download task，然后调用completionHandler去convert, continue, 或者 cancel the task.
+// 如果你的app决定将data task转换为download task，那么接下来会调用代理方法URLSession:dataTask:didBecomeDownloadTask:，
+// 参数为新的download task，然后不会收到data task的回调，而是收到download task的回调。
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+didReceiveResponse:(nonnull NSURLResponse *)response
+ completionHandler:(nonnull void (^)(NSURLSessionResponseDisposition))completionHandler {
+    
+    // 在收到response之后，决定如何处理这个dataTask，
+    // NSURLSessionResponseDisposition有4中选择方式：
+    // 1. NSURLSessionResponseCancel = 0,
+    // 2. NSURLSessionResponseAllow = 1,
+    // 3. NSURLSessionResponseBecomeDownload = 2,
+    // 4. NSURLSessionResponseBecomeStream = 3
+    // AFNetworking选择了继续处理，
+    NSURLSessionResponseDisposition disposition = NSURLSessionResponseAllow;
+    
+    if (self.dataTaskDidReceiveResponse) {
+        disposition = self.dataTaskDidReceiveResponse(session, dataTask, response);
+    }
+    
+    if (completionHandler) {
+        completionHandler(disposition);
+    }
+}
+
+// 在代理8中，决定将data task变成download task之后就会调用这个代理方法，
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+didBecomeDownloadTask:(nonnull NSURLSessionDownloadTask *)downloadTask {
+    
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:dataTask];
+    if (delegate) {
+        // 由于之前的data task不再收到回调，而是转为download task处理回调，所以移除之前dataTask的代理，
+        // 并设置downTask的代理
+        [self removeDelegateForTask:dataTask];
+        [self setDelegate:delegate forTask:downloadTask];
+    }
+    
+    if (self.dataTaskDidBecomeDownloadTask) {
+        self.dataTaskDidBecomeDownloadTask(session, dataTask, downloadTask);
+    }
+}
+
+// 9. 对于data task，周期性地调用这个代理方法处理从服务器接收到的数据
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+    didReceiveData:(nonnull NSData *)data {
+    
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:dataTask];
+    // 调用task自身实现的代理
+    [delegate URLSession:session dataTask:dataTask didReceiveData:data];
+    
+    if (self.dataTaskDidReceiveData) {
+        self.dataTaskDidReceiveData(session, dataTask, data);
+    }
+}
+
+// 10. 对于data task，你的app应该决定是否允许缓存。如果不实现这个方法，那么默认就是使用session的configuration中的caching
+// policy来决定是否缓存。缓存什么？？？ 缓存的是response
+- (void)URLSession:(NSURLSession *)session
+          dataTask:(NSURLSessionDataTask *)dataTask
+ willCacheResponse:(nonnull NSCachedURLResponse *)proposedResponse
+ completionHandler:(nonnull void (^)(NSCachedURLResponse * _Nullable))completionHandler {
+    
+    NSCachedURLResponse *cachedResponse = proposedResponse;
+    
+    if (self.dataTaskWillCacheResponse) {
+        cachedResponse = self.dataTaskWillCacheResponse(session, dataTask, proposedResponse);
+    }
+    
+    if (completionHandler) {
+        completionHandler(cachedResponse);
+    }
+}
+
+#if !TARGET_OS_OSX
+// URLSessionDidFinishEventsForBackgroundURLSession:其实是NSURLSessionDelegate的代理方法
+// background transfer completes，然后就会发送这个消息；如果你的app没有在运行，那么就会在后台自动重启你的app，
+// 然后UIApplicationDelegate被发送application:handleEventsForBackgroundURLSession:completionHandler:消息。
+- (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session {
+    if (self.didFinishEventsForBackgroundURLSession) {
+        // Because the provided completion handler is part of UIKit, you must call it on your main thread.
+        // 必须在主线程完成回调
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.didFinishEventsForBackgroundURLSession(session);
+        });
+    }
+}
+#endif
+
+#pragma mark - NSURLSessionDownloadDelegate
+
+// 12. 当下载完成会调用这个回调，location参数是临时文件的位置，需要将临时文件转移到永久文件系统位置中
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+didFinishDownloadingToURL:(nonnull NSURL *)location {
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:downloadTask];
+    if (self.downloadTaskDidFinishDownloading) {
+        NSURL *fileURL = self.downloadTaskDidFinishDownloading(session, downloadTask, location);
+        if (fileURL) {
+            delegate.downloadFileURL = fileURL;
+            NSError *error = nil;
+            
+            if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:fileURL error:&error]) {
+                [[NSNotificationCenter defaultCenter] postNotificationName:AFURLSessionDownloadTaskDidFailToMoveFileNotification object:downloadTask userInfo:error.userInfo];
+            }
+            
+            return;
+        }
+    }
+    
+    if (delegate) {
+        [delegate URLSession:session downloadTask:downloadTask didFinishDownloadingToURL:location];
+    }
+}
+
+// 9. 对于一个download task，周期性地获取下载数据会调用这个回调，
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+      didWriteData:(int64_t)bytesWritten
+ totalBytesWritten:(int64_t)totalBytesWritten
+totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite {
+    
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:downloadTask];
+    
+    if (delegate) {
+        [delegate URLSession:session downloadTask:downloadTask didWriteData:bytesWritten totalBytesWritten:totalBytesWritten totalBytesExpectedToWrite:totalBytesExpectedToWrite];
+    }
+    
+    if (self.downloadTaskDidWriteData) {
+        self.downloadTaskDidWriteData(session, downloadTask, bytesWritten, totalBytesWritten, totalBytesExpectedToWrite);
+    }
+}
+
+// 7. 当一个download/redownload task通过downloadTaskWithResumeData:创建，NSURLSession会调用这个代理方法
+- (void)URLSession:(NSURLSession *)session
+      downloadTask:(NSURLSessionDownloadTask *)downloadTask
+ didResumeAtOffset:(int64_t)fileOffset
+expectedTotalBytes:(int64_t)expectedTotalBytes
+{
+    
+    AFURLSessionManagerTaskDelegate *delegate = [self delegateForTask:downloadTask];
+    
+    if (delegate) {
+        [delegate URLSession:session downloadTask:downloadTask didResumeAtOffset:fileOffset expectedTotalBytes:expectedTotalBytes];
+    }
+    
+    if (self.downloadTaskDidResume) {
+        self.downloadTaskDidResume(session, downloadTask, fileOffset, expectedTotalBytes);
+    }
+}
+
+#pragma mark - NSSecureCoding
+
++ (BOOL)supportsSecureCoding {
+    return YES;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)decoder {
+    NSURLSessionConfiguration *configuration = [decoder decodeObjectOfClass:[NSURLSessionConfiguration class] forKey:@"sessionConfiguration"];
+    
+    self = [self initWithSessionConfiguration:configuration];
+    if (!self) {
+        return nil;
+    }
+    
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeObject:self.session.configuration forKey:@"sessionConfiguration"];
+}
+
+#pragma mark - NSCopying
+
+- (instancetype)copyWithZone:(NSZone *)zone {
+    return [[[self class] allocWithZone:zone] initWithSessionConfiguration:self.session.configuration];
+}
+
 
 @end
