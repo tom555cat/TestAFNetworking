@@ -15,6 +15,7 @@
 		8E074D0022F3CD1100CECAF6 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074CFF22F3CD1100CECAF6 /* main.m */; };
 		8E074D0922F3CE0A00CECAF6 /* TLMAFURLSessionManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */; };
 		8E074D5722F814FA00CECAF6 /* AFSecurityPolicy.m in Sources */ = {isa = PBXBuildFile; fileRef = 8E074D5622F814FA00CECAF6 /* AFSecurityPolicy.m */; };
+		E9C78506230DA5C90091B2B5 /* AFNetworkReachabilityManager.m in Sources */ = {isa = PBXBuildFile; fileRef = E9C78505230DA5C90091B2B5 /* AFNetworkReachabilityManager.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,8 @@
 		8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TLMAFURLSessionManager.m; sourceTree = "<group>"; };
 		8E074D5522F814FA00CECAF6 /* AFSecurityPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AFSecurityPolicy.h; sourceTree = "<group>"; };
 		8E074D5622F814FA00CECAF6 /* AFSecurityPolicy.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AFSecurityPolicy.m; sourceTree = "<group>"; };
+		E9C78504230DA5C90091B2B5 /* AFNetworkReachabilityManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AFNetworkReachabilityManager.h; sourceTree = "<group>"; };
+		E9C78505230DA5C90091B2B5 /* AFNetworkReachabilityManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AFNetworkReachabilityManager.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -84,6 +87,8 @@
 				8E074D5422F814D200CECAF6 /* Security */,
 				8E074D0722F3CE0A00CECAF6 /* TLMAFURLSessionManager.h */,
 				8E074D0822F3CE0A00CECAF6 /* TLMAFURLSessionManager.m */,
+				E9C78504230DA5C90091B2B5 /* AFNetworkReachabilityManager.h */,
+				E9C78505230DA5C90091B2B5 /* AFNetworkReachabilityManager.m */,
 			);
 			path = AFNetworking;
 			sourceTree = "<group>";
@@ -171,6 +176,7 @@
 				8E074D5722F814FA00CECAF6 /* AFSecurityPolicy.m in Sources */,
 				8E074D0922F3CE0A00CECAF6 /* TLMAFURLSessionManager.m in Sources */,
 				8E074D0022F3CD1100CECAF6 /* main.m in Sources */,
+				E9C78506230DA5C90091B2B5 /* AFNetworkReachabilityManager.m in Sources */,
 				8E074CF222F3CD1100CECAF6 /* AppDelegate.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
