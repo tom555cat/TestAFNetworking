@@ -25,6 +25,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) AFSecurityPolicy *securityPolicy;
 
 #warning 这个需要单独看
+// reachabilityManager监控了网络可达来阻止网络请求(当连接不可达的时候)。
 @property (readwrite, nonatomic, strong) AFNetworkReachabilityManager *reachabilityManager;
 
 // 三种类型任务存放的数组，data,upload,download，基类是NSURLSessionTask
